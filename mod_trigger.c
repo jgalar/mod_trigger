@@ -23,6 +23,7 @@
 #include <apr_strings.h>
 #include <apr_base64.h>
 #include <apr_lib.h>
+#include <unistd.h>
 
 #include "httpd.h"
 #include "http_config.h"
@@ -31,17 +32,72 @@
 #include "http_request.h"
 
 #define SCRIPT_PATH "/home/efficios/lttng/snapshot.sh"
+#define MAX_REQUEST_TIME ((double) 1.0)
 
 module AP_MODULE_DECLARE_DATA trigger_module;
+struct timeval tv_start;
 
-static int log_slow_log_transaction(request_rec *r)
+static double get_time_elapsed(struct timeval *start, struct timeval *end)
 {
+	double a, b;
+
+	b = start->tv_sec + (double) start->tv_usec * (double) 1e-6;
+	a = end->tv_sec + (double) end->tv_usec * (double) 1e-6;
+	return (a - b);
+}
+
+static void set_timeval(struct timeval *tv)
+{
+	gettimeofday(tv, NULL);
+}
+
+static int handle_post_read_request(request_rec *r)
+{
+	set_timeval(&tv_start);
+	return DECLINED;
+}
+
+static void trigger(double time_elapsed)
+{
+	pid_t pid;
+	int status;
+
+	/* Double fork so child processes are inherited by init. */
+	pid = fork();
+	if (pid == 0) {
+		pid = fork();
+		if (pid == 0) {
+			char *args[] = { 0 };
+			execv(SCRIPT_PATH, args);
+		} else {
+			exit(0);
+		}
+	} else {
+		waitpid(pid, &status, 0);
+	}
+}
+
+static int handle_log_transaction(request_rec *r)
+{
+	double time_elapsed;
+        struct timeval tv_end;
+
+	set_timeval(&tv_end);
+	time_elapsed = get_time_elapsed(&tv_start, &tv_end);
+
+	if (time_elapsed > MAX_REQUEST_TIME) {
+		trigger(time_elapsed);
+	}
+
 	return DECLINED;
 }
 
 void trigger_register_hooks(apr_pool_t *p)
 {
-    ap_hook_log_transaction(handle_log_transaction, NULL, NULL, APR_HOOK_FIRST);
+	ap_hook_log_transaction(handle_log_transaction, NULL, NULL,
+			APR_HOOK_FIRST);
+	ap_hook_post_read_request(handle_post_read_request, NULL, NULL,
+			APR_HOOK_MIDDLE);
 }
 
 module AP_MODULE_DECLARE_DATA lttng_module =
