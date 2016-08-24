@@ -1,0 +1,15 @@
+This is a proof-of-concept showing how an action can be triggered
+by an Apache httpd module when a request exceeds a set time threshold.
+
+Originally developped for a demo at LinuxCon North America 2016.
+
+Building
+--------
+
+$ apxs -c mod_trigger.c
+
+Installing
+----------
+
+# apxs -i -a mod_trigger.c
+
